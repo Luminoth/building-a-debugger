@@ -24,6 +24,9 @@ fn main() -> anyhow::Result<()> {
         Command::Attach(command) => {
             info!("Attaching to process {} ...", command.process_id);
             sdb::attach(command.process_id)?;
+            // TODO: if the error from this is operation not permitted
+            // print something like gdb does about how
+            // "if the uid is the same, fix this at the system level"
         }
         Command::Spawn(command) => {
             info!("Spawning process from {} ...", command.path);
