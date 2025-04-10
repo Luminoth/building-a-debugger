@@ -1,4 +1,4 @@
 [workspace]
 resolver = "2"
 
-members = ["sdb", "sdb_client"]
+members = ["sdb", "client"]

@@ -1,7 +1,11 @@
 [package]
-name = "sdb_client"
+name = "client"
 version = "0.1.0"
 edition = "2024"
+
+[[bin]]
+name = "sdb"
+path = "src/main.rs"
 
 [dependencies]
 anyhow = "1.0"
