@@ -37,7 +37,7 @@ pub fn spawn_and_attach(path: impl Into<String>) -> Result<()> {
         }
         Ok(ForkResult::Child) => {
             ptrace::traceme().map_err(SdbError::Ptrace)?;
-            execvp(path.as_c_str(), &args).unwrap();
+            execvp(path.as_c_str(), &args).ok();
             unreachable!();
         }
         Err(errno) => Err(SdbError::Fork(errno)),

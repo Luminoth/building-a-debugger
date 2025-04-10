@@ -1,5 +1,10 @@
 mod options;
 
+use rustyline::{
+    DefaultEditor,
+    error::ReadlineError,
+    history::{History, SearchDirection},
+};
 use tracing::{Level, info};
 use tracing_subscriber::FmtSubscriber;
 
@@ -13,6 +18,15 @@ fn init_logging() -> anyhow::Result<()> {
     tracing::subscriber::set_global_default(subscriber)?;
 
     Ok(())
+}
+
+fn handle_command(command: impl Into<String>) {
+    let command = command.into();
+    if command.trim().is_empty() {
+        return;
+    }
+
+    info!("command: {}", command);
 }
 
 fn main() -> anyhow::Result<()> {
@@ -31,6 +45,37 @@ fn main() -> anyhow::Result<()> {
         Command::Spawn(command) => {
             info!("Spawning process from {} ...", command.path);
             sdb::spawn_and_attach(command.path)?;
+        }
+    }
+
+    let mut rl = DefaultEditor::new()?;
+    loop {
+        let readline = rl.readline(">> ");
+        match readline {
+            Ok(mut line) => {
+                if line.trim().is_empty() {
+                    let history = rl.history();
+                    if history.len() > 0 {
+                        line = history
+                            .get(history.len() - 1, SearchDirection::Forward)?
+                            .unwrap()
+                            .entry
+                            .into();
+                    }
+                } else {
+                    rl.add_history_entry(line.as_str())?;
+                }
+                handle_command(line);
+            }
+            Err(ReadlineError::Interrupted) => {
+                break;
+            }
+            Err(ReadlineError::Eof) => {
+                break;
+            }
+            Err(err) => {
+                Err(err)?;
+            }
         }
     }
 
