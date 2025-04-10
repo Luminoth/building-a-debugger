@@ -25,6 +25,10 @@ fn main() -> anyhow::Result<()> {
             info!("Attaching to process {} ...", command.process_id);
             sdb::attach(command.process_id)?;
         }
+        Command::Spawn(command) => {
+            info!("Spawning process from {} ...", command.path);
+            sdb::spawn_and_attach(command.path)?;
+        }
     }
 
     Ok(())
