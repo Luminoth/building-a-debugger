@@ -1,0 +1,12 @@
+[package]
+name = "sdb_client"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0"
+argh = "0.1"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+sdb = { path = "../sdb" }
