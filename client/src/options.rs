@@ -11,7 +11,7 @@ pub enum Command {
 #[argh(subcommand, name = "attach")]
 pub struct AttachCommand {
     #[argh(positional)]
-    pub process_id: i64,
+    pub process_id: i32,
 }
 
 /// Command line Options

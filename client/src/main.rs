@@ -21,7 +21,10 @@ fn main() -> anyhow::Result<()> {
     init_logging()?;
 
     match options.command {
-        Command::Attach(command) => info!("attach to {}", command.process_id),
+        Command::Attach(command) => {
+            info!("Attaching to process {} ...", command.process_id);
+            sdb::attach(command.process_id)?;
+        }
     }
 
     Ok(())
