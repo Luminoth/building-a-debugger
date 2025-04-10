@@ -21,8 +21,8 @@ fn init_logging() -> anyhow::Result<()> {
 }
 
 fn handle_command(command: impl Into<String>) {
-    let command = command.into();
-    if command.trim().is_empty() {
+    let command = command.into().trim().to_owned();
+    if command.is_empty() {
         return;
     }
 
