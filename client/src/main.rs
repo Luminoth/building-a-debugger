@@ -20,7 +20,7 @@ fn init_logging() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn handle_command(process: &sdb::Process, command: impl Into<String>) -> anyhow::Result<()> {
+fn handle_command(process: &mut sdb::Process, command: impl Into<String>) -> anyhow::Result<()> {
     let command = command.into();
     let v = command.split_whitespace().collect::<Vec<_>>();
     if v.is_empty() {
@@ -43,7 +43,7 @@ fn main() -> anyhow::Result<()> {
 
     init_logging()?;
 
-    let process = match options.command {
+    let mut process = match options.command {
         Command::Attach(command) => {
             info!("Attaching to process {} ...", command.process_id);
             sdb::Process::attach(command.process_id)?
@@ -74,7 +74,7 @@ fn main() -> anyhow::Result<()> {
                 } else {
                     rl.add_history_entry(line.as_str())?;
                 }
-                handle_command(&process, line)?;
+                handle_command(&mut process, line)?;
             }
             Err(ReadlineError::Interrupted) => {
                 break;

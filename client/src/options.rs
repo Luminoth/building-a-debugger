@@ -17,7 +17,7 @@ pub struct AttachCommand {
 
 /// Spawn a process and attach to it
 #[derive(Debug, PartialEq, FromArgs)]
-#[argh(subcommand, name = "spawn")]
+#[argh(subcommand, name = "run")]
 pub struct SpawnCommand {
     #[argh(positional)]
     pub path: String,

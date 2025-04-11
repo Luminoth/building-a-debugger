@@ -21,17 +21,40 @@ pub enum SdbError {
 pub type Result<T> = std::result::Result<T, SdbError>;
 
 #[derive(Debug)]
+pub enum ProcessState {
+    Stopped,
+    Running,
+    Exited,
+    Terminated,
+}
+
+#[derive(Debug)]
 pub struct Process {
     pid: Pid,
+    terminate_on_drop: bool,
+    state: ProcessState,
+}
+
+impl Drop for Process {
+    fn drop(&mut self) {
+        if self.terminate_on_drop {
+            // TODO:
+        }
+    }
 }
 
 impl Process {
     pub fn attach(pid: i32) -> Result<Self> {
-        let pid = Pid::from_raw(pid);
-        ptrace::attach(pid).map_err(SdbError::Ptrace)?;
-        waitpid(pid, None).map_err(SdbError::WaitPid)?;
+        let this = Self {
+            pid: Pid::from_raw(pid),
+            terminate_on_drop: false,
+            state: ProcessState::Stopped,
+        };
 
-        Ok(Self { pid })
+        ptrace::attach(this.pid).map_err(SdbError::Ptrace)?;
+        this.wait_on_signal()?;
+
+        Ok(this)
     }
 
     pub fn spawn_and_attach(path: impl Into<String>) -> Result<Self> {
@@ -40,8 +63,13 @@ impl Process {
 
         match unsafe { fork() } {
             Ok(ForkResult::Parent { child }) => {
-                waitpid(child, None).map_err(SdbError::WaitPid)?;
-                Ok(Self { pid: child })
+                let this = Self {
+                    pid: child,
+                    terminate_on_drop: true,
+                    state: ProcessState::Stopped,
+                };
+                this.wait_on_signal()?;
+                Ok(this)
             }
             Ok(ForkResult::Child) => {
                 ptrace::traceme().map_err(SdbError::Ptrace)?;
@@ -52,10 +80,16 @@ impl Process {
         }
     }
 
-    pub fn resume(&self) -> Result<()> {
+    pub fn wait_on_signal(&self) -> Result<()> {
+        waitpid(self.pid, None).map_err(SdbError::WaitPid)?;
+        Ok(())
+    }
+
+    pub fn resume(&mut self) -> Result<()> {
         ptrace::cont(self.pid, None).map_err(SdbError::Ptrace)?;
         // TODO: this is hanging for some reason
-        //waitpid(self.pid, None).map_err(SdbError::WaitPid)?;
+        //self.wait_on_signal()?;
+        self.state = ProcessState::Running;
 
         Ok(())
     }
