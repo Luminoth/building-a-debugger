@@ -20,13 +20,22 @@ fn init_logging() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn handle_command(command: impl Into<String>) {
-    let command = command.into().trim().to_owned();
-    if command.is_empty() {
-        return;
+fn handle_command(process: &sdb::Process, command: impl Into<String>) -> anyhow::Result<()> {
+    let command = command.into();
+    let v = command.split_whitespace().collect::<Vec<_>>();
+    if v.is_empty() {
+        return Ok(());
     }
 
-    info!("command: {}", command);
+    let command = v[0];
+    let _args = &v[1..];
+
+    if command.starts_with("cont") {
+        info!("Resuming process ...");
+        process.resume()?;
+    }
+
+    Ok(())
 }
 
 fn main() -> anyhow::Result<()> {
@@ -34,19 +43,19 @@ fn main() -> anyhow::Result<()> {
 
     init_logging()?;
 
-    match options.command {
+    let process = match options.command {
         Command::Attach(command) => {
             info!("Attaching to process {} ...", command.process_id);
-            sdb::attach(command.process_id)?;
+            sdb::Process::attach(command.process_id)?
             // TODO: if the error from this is operation not permitted
             // print something like gdb does about how
             // "if the uid is the same, fix this at the system level"
         }
         Command::Spawn(command) => {
             info!("Spawning process from {} ...", command.path);
-            sdb::spawn_and_attach(command.path)?;
+            sdb::Process::spawn_and_attach(command.path)?
         }
-    }
+    };
 
     let mut rl = DefaultEditor::new()?;
     loop {
@@ -65,7 +74,7 @@ fn main() -> anyhow::Result<()> {
                 } else {
                     rl.add_history_entry(line.as_str())?;
                 }
-                handle_command(line);
+                handle_command(&process, line)?;
             }
             Err(ReadlineError::Interrupted) => {
                 break;
