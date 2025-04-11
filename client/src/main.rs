@@ -33,6 +33,8 @@ fn handle_command(process: &mut sdb::Process, command: impl Into<String>) -> any
     if command.starts_with("cont") {
         info!("Resuming process ...");
         process.resume()?;
+        // TODO: this is hanging for some reason
+        //process.wait_on_signal()?;
     }
 
     Ok(())
@@ -53,7 +55,7 @@ fn main() -> anyhow::Result<()> {
         }
         Command::Spawn(command) => {
             info!("Spawning process from {} ...", command.path);
-            sdb::Process::spawn_and_attach(command.path)?
+            sdb::Process::launch(command.path)?
         }
     };
 

@@ -20,8 +20,9 @@ pub enum SdbError {
 
 pub type Result<T> = std::result::Result<T, SdbError>;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub enum ProcessState {
+    #[default]
     Stopped,
     Running,
     Exited,
@@ -44,30 +45,29 @@ impl Drop for Process {
 }
 
 impl Process {
-    pub fn attach(pid: i32) -> Result<Self> {
-        let this = Self {
-            pid: Pid::from_raw(pid),
-            terminate_on_drop: false,
-            state: ProcessState::Stopped,
-        };
+    fn new(pid: Pid, terminate_on_drop: bool) -> Self {
+        Self {
+            pid,
+            terminate_on_drop,
+            state: ProcessState::default(),
+        }
+    }
 
+    pub fn attach(pid: i32) -> Result<Self> {
+        let this = Self::new(Pid::from_raw(pid), false);
         ptrace::attach(this.pid).map_err(SdbError::Ptrace)?;
         this.wait_on_signal()?;
 
         Ok(this)
     }
 
-    pub fn spawn_and_attach(path: impl Into<String>) -> Result<Self> {
+    pub fn launch(path: impl Into<String>) -> Result<Self> {
         let path = CString::new(path.into()).unwrap();
         let args: Vec<CString> = Vec::default();
 
         match unsafe { fork() } {
             Ok(ForkResult::Parent { child }) => {
-                let this = Self {
-                    pid: child,
-                    terminate_on_drop: true,
-                    state: ProcessState::Stopped,
-                };
+                let this = Self::new(child, true);
                 this.wait_on_signal()?;
                 Ok(this)
             }
@@ -81,14 +81,13 @@ impl Process {
     }
 
     pub fn wait_on_signal(&self) -> Result<()> {
-        waitpid(self.pid, None).map_err(SdbError::WaitPid)?;
-        Ok(())
+        waitpid(self.pid, None)
+            .map_err(SdbError::WaitPid)
+            .map(|_| ())
     }
 
     pub fn resume(&mut self) -> Result<()> {
         ptrace::cont(self.pid, None).map_err(SdbError::Ptrace)?;
-        // TODO: this is hanging for some reason
-        //self.wait_on_signal()?;
         self.state = ProcessState::Running;
 
         Ok(())
