@@ -2,9 +2,10 @@ use std::ffi::CString;
 
 use nix::{
     errno::Errno,
-    sys::{ptrace, wait::waitpid},
+    sys::{ptrace, signal, wait::waitpid},
     unistd::{ForkResult, Pid, execvp, fork},
 };
+use tracing::trace;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SdbError {
@@ -20,7 +21,7 @@ pub enum SdbError {
 
 pub type Result<T> = std::result::Result<T, SdbError>;
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub enum ProcessState {
     #[default]
     Stopped,
@@ -37,9 +38,26 @@ pub struct Process {
 }
 
 impl Drop for Process {
+    #[allow(unused_must_use)]
     fn drop(&mut self) {
-        if self.terminate_on_drop {
-            // TODO:
+        if self.pid.as_raw() != 0 {
+            // have to stop the process before detaching
+            trace!("Stopping process ...");
+            if self.state == ProcessState::Running {
+                signal::kill(self.pid, signal::SIGSTOP);
+                waitpid(self.pid, None);
+            }
+
+            // detach and resume the process
+            trace!("Detaching and resuming process ...");
+            ptrace::detach(self.pid, None);
+            signal::kill(self.pid, signal::SIGCONT);
+
+            if self.terminate_on_drop {
+                trace!("Terminating process ...");
+                signal::kill(self.pid, signal::SIGKILL);
+                waitpid(self.pid, None);
+            }
         }
     }
 }
