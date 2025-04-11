@@ -1,5 +1,6 @@
 mod options;
 
+use nix::sys::wait;
 use rustyline::{
     DefaultEditor,
     error::ReadlineError,
@@ -20,6 +21,30 @@ fn init_logging() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
+fn print_stop_reason(process: &sdb::Process, status: wait::WaitStatus) {
+    match process.get_state() {
+        sdb::ProcessState::Stopped => info!(
+            "Process {} stopped with signal {:?}",
+            process.get_id(),
+            status
+        ),
+        sdb::ProcessState::Exited => info!(
+            "Process {} exited with status {:?}",
+            process.get_id(),
+            status
+        ),
+        sdb::ProcessState::Terminated => {
+            info!(
+                "Process {} terminated with signal {:?}",
+                process.get_id(),
+                status
+            )
+        }
+        _ => (),
+    }
+}
+
 fn handle_command(process: &mut sdb::Process, command: impl Into<String>) -> anyhow::Result<()> {
     let command = command.into();
     let v = command.split_whitespace().collect::<Vec<_>>();
@@ -34,31 +59,14 @@ fn handle_command(process: &mut sdb::Process, command: impl Into<String>) -> any
         info!("Resuming process ...");
         process.resume()?;
         // TODO: this is hanging for some reason
-        //process.wait_on_signal()?;
+        /*let status = process.wait_on_signal()?;
+        print_stop_reason(process, status);*/
     }
 
     Ok(())
 }
 
-fn main() -> anyhow::Result<()> {
-    let options = argh::from_env::<Options>();
-
-    init_logging()?;
-
-    let mut process = match options.command {
-        Command::Attach(command) => {
-            info!("Attaching to process {} ...", command.process_id);
-            sdb::Process::attach(command.process_id)?
-            // TODO: if the error from this is operation not permitted
-            // print something like gdb does about how
-            // "if the uid is the same, fix this at the system level"
-        }
-        Command::Spawn(command) => {
-            info!("Spawning process from {} ...", command.path);
-            sdb::Process::launch(command.path)?
-        }
-    };
-
+fn run(mut process: sdb::Process) -> anyhow::Result<()> {
     let mut rl = DefaultEditor::new()?;
     loop {
         let readline = rl.readline(">> ");
@@ -91,4 +99,26 @@ fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+fn main() -> anyhow::Result<()> {
+    let options = argh::from_env::<Options>();
+
+    init_logging()?;
+
+    let process = match options.command {
+        Command::Attach(command) => {
+            info!("Attaching to process {} ...", command.process_id);
+            sdb::Process::attach(command.process_id)?
+            // TODO: if the error from this is operation not permitted
+            // print something like gdb does about how
+            // "if the uid is the same, fix this at the system level"
+        }
+        Command::Spawn(command) => {
+            info!("Spawning process from {} ...", command.path);
+            sdb::Process::launch(command.path)?
+        }
+    };
+
+    run(process)
 }

@@ -2,7 +2,7 @@ use std::ffi::CString;
 
 use nix::{
     errno::Errno,
-    sys::{ptrace, signal, wait::waitpid},
+    sys::{ptrace, signal, wait},
     unistd::{ForkResult, Pid, execvp, fork},
 };
 use tracing::trace;
@@ -21,7 +21,7 @@ pub enum SdbError {
 
 pub type Result<T> = std::result::Result<T, SdbError>;
 
-#[derive(Debug, Default, PartialEq, Eq)]
+#[derive(Debug, Default, Copy, Clone, PartialEq, Eq)]
 pub enum ProcessState {
     #[default]
     Stopped,
@@ -45,7 +45,7 @@ impl Drop for Process {
             trace!("Stopping process ...");
             if self.state == ProcessState::Running {
                 signal::kill(self.pid, signal::SIGSTOP);
-                waitpid(self.pid, None);
+                wait::waitpid(self.pid, None);
             }
 
             // detach and resume the process
@@ -56,7 +56,7 @@ impl Drop for Process {
             if self.terminate_on_drop {
                 trace!("Terminating process ...");
                 signal::kill(self.pid, signal::SIGKILL);
-                waitpid(self.pid, None);
+                wait::waitpid(self.pid, None);
             }
         }
     }
@@ -72,7 +72,7 @@ impl Process {
     }
 
     pub fn attach(pid: i32) -> Result<Self> {
-        let this = Self::new(Pid::from_raw(pid), false);
+        let mut this = Self::new(Pid::from_raw(pid), false);
         ptrace::attach(this.pid).map_err(SdbError::Ptrace)?;
         this.wait_on_signal()?;
 
@@ -85,7 +85,7 @@ impl Process {
 
         match unsafe { fork() } {
             Ok(ForkResult::Parent { child }) => {
-                let this = Self::new(child, true);
+                let mut this = Self::new(child, true);
                 this.wait_on_signal()?;
                 Ok(this)
             }
@@ -98,10 +98,26 @@ impl Process {
         }
     }
 
-    pub fn wait_on_signal(&self) -> Result<()> {
-        waitpid(self.pid, None)
-            .map_err(SdbError::WaitPid)
-            .map(|_| ())
+    #[inline]
+    pub fn get_id(&self) -> Pid {
+        self.pid
+    }
+
+    #[inline]
+    pub fn get_state(&self) -> ProcessState {
+        self.state
+    }
+
+    pub fn wait_on_signal(&mut self) -> Result<wait::WaitStatus> {
+        let status = wait::waitpid(self.pid, None).map_err(SdbError::WaitPid)?;
+        trace!("Wait status {:?}", status);
+        match status {
+            wait::WaitStatus::Exited(..) => self.state = ProcessState::Exited,
+            wait::WaitStatus::Signaled(..) => self.state = ProcessState::Terminated,
+            wait::WaitStatus::Stopped(..) => self.state = ProcessState::Stopped,
+            _ => (),
+        }
+        Ok(status)
     }
 
     pub fn resume(&mut self) -> Result<()> {
