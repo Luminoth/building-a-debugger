@@ -1,3 +1,5 @@
+mod test;
+
 use std::ffi::CString;
 
 use nix::{
@@ -7,7 +9,7 @@ use nix::{
 };
 use tracing::trace;
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum SdbError {
     #[error("ptrace error: {0}")]
     Ptrace(Errno),
@@ -125,5 +127,25 @@ impl Process {
         self.state = ProcessState::Running;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn process_launch_success() {
+        let process = Process::launch("yes").unwrap();
+        assert!(test::process_exists(process.get_id()).is_ok());
+    }
+
+    #[test]
+    fn process_launch_failure() {
+        let process = Process::launch("you_do_not_have_to_be_good").unwrap();
+        assert_eq!(
+            test::process_exists(process.get_id()),
+            nix::Result::Err(Errno::ESRCH)
+        );
     }
 }
