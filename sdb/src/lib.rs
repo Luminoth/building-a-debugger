@@ -1,3 +1,4 @@
+mod pipe;
 mod test;
 
 use std::ffi::CString;
@@ -5,12 +6,17 @@ use std::ffi::CString;
 use nix::{
     errno::Errno,
     sys::{ptrace, signal, wait},
-    unistd::{ForkResult, Pid, execvp, fork},
+    unistd::{self, Pid},
 };
 use tracing::trace;
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, thiserror::Error)]
+use pipe::Pipe;
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum SdbError {
+    #[error("child error: {0}")]
+    Child(String),
+
     #[error("ptrace error: {0}")]
     Ptrace(Errno),
 
@@ -19,6 +25,18 @@ pub enum SdbError {
 
     #[error("waitpid error: {0}")]
     WaitPid(Errno),
+
+    #[error("pipe error: {0}")]
+    Pipe(Errno),
+
+    #[error("read error: {0}")]
+    Read(Errno),
+
+    #[error("write error: {0}")]
+    Write(Errno),
+
+    #[error("other error: {0}")]
+    Other(String),
 }
 
 pub type Result<T> = std::result::Result<T, SdbError>;
@@ -85,19 +103,42 @@ impl Process {
         let path = CString::new(path.into()).unwrap();
         let args: Vec<CString> = Vec::default();
 
-        match unsafe { fork() } {
-            Ok(ForkResult::Parent { child }) => {
+        let mut channel = Pipe::new(true)?;
+
+        match unsafe { unistd::fork() } {
+            Ok(unistd::ForkResult::Parent { child }) => {
+                channel.close_write();
+
+                let data = channel.read()?;
+                if !data.is_empty() {
+                    // TODO: waitpid(child) here?
+                    return Err(SdbError::Child(String::from_utf8(data).unwrap()));
+                }
+
                 let mut this = Self::new(child, true);
                 this.wait_on_signal()?;
                 Ok(this)
             }
-            Ok(ForkResult::Child) => {
-                ptrace::traceme().map_err(SdbError::Ptrace)?;
-                execvp(path.as_c_str(), &args).ok();
+            Ok(unistd::ForkResult::Child) => {
+                channel.close_read();
+
+                if let Err(errno) = ptrace::traceme() {
+                    Self::exit_with_perror(&channel, "Tracing failed", errno);
+                }
+
+                let Err(errno) = unistd::execvp(path.as_c_str(), &args);
+                Self::exit_with_perror(&channel, "exec failed", errno);
+
                 unreachable!();
             }
             Err(errno) => Err(SdbError::Fork(errno)),
         }
+    }
+
+    fn exit_with_perror(channel: &Pipe, prefix: impl AsRef<str>, errno: Errno) {
+        let message = format!("{}: {}", prefix.as_ref(), errno);
+        let _ = channel.write(message);
+        std::process::exit(-1);
     }
 
     #[inline]
@@ -136,16 +177,18 @@ mod tests {
 
     #[test]
     fn process_launch_success() {
-        let process = Process::launch("yes").unwrap();
-        assert!(test::process_exists(process.get_id()).is_ok());
+        let process = Process::launch("yes");
+        assert!(process.is_ok());
+        assert_eq!(test::process_exists(process.unwrap().get_id()), Ok(()));
     }
 
     #[test]
     fn process_launch_failure() {
-        let process = Process::launch("you_do_not_have_to_be_good").unwrap();
-        assert_eq!(
-            test::process_exists(process.get_id()),
-            nix::Result::Err(Errno::ESRCH)
-        );
+        let process = Process::launch("you_do_not_have_to_be_good");
+        assert!(process.is_err());
+        assert!(matches!(
+            process,
+            std::result::Result::Err(SdbError::Child(..))
+        ));
     }
 }
