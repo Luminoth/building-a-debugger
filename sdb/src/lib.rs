@@ -1,5 +1,6 @@
 mod pipe;
 mod register_info;
+mod registers;
 mod test;
 
 use std::ffi::CString;

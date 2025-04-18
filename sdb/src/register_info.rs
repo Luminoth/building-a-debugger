@@ -501,6 +501,7 @@ const REGISTER_INFOS: &[RegisterInfo] = &[
     define_dr!(dr7, 7),
 ];
 
+// TODO: if we use a BTreeMap, this can go away?
 pub fn register_info_by_id(id: RegisterId) -> &'static RegisterInfo {
     REGISTER_INFOS.iter().find(|&info| info.id == id).unwrap()
 }
