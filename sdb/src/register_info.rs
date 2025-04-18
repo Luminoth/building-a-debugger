@@ -16,6 +16,12 @@ macro_rules! fpr_offset {
     };
 }
 
+macro_rules! dr_offset {
+    ($number:literal) => {
+        std::mem::offset_of!(libc::user, u_debugreg) + $number * 8
+    };
+}
+
 // https://internals.rust-lang.org/t/official-way-to-get-the-size-of-a-field/22123
 const fn size_of_return_value<F, T, U>(_f: &F) -> usize
 where
@@ -39,7 +45,7 @@ macro_rules! fpr_size {
 // TODO: there's probably a way to turn this into a more X-macro style?
 // where the enum and the array are automatically kept in sync
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum RegisterId {
     // 64-bit GPRs
     rax,
@@ -139,6 +145,54 @@ pub enum RegisterId {
     frdp,
     mxcsr,
     mxcsrmask,
+
+    // ST registers
+    st0,
+    st1,
+    st2,
+    st3,
+    st4,
+    st5,
+    st6,
+    st7,
+
+    // MM registers
+    mm0,
+    mm1,
+    mm2,
+    mm3,
+    mm4,
+    mm5,
+    mm6,
+    mm7,
+
+    // XMM registers
+    xmm0,
+    xmm1,
+    xmm2,
+    xmm3,
+    xmm4,
+    xmm5,
+    xmm6,
+    xmm7,
+    xmm8,
+    xmm9,
+    xmm10,
+    xmm11,
+    xmm12,
+    xmm13,
+    xmm14,
+    xmm15,
+
+    // Debug registers
+    dr0,
+    dr1,
+    dr2,
+    dr3,
+    dr4,
+    dr5,
+    dr6,
+    dr7,
 }
 
 #[derive(Debug)]
@@ -172,7 +226,7 @@ macro_rules! define_gpr_64 {
     ($name:ident, $dwarf_id:literal) => {
         RegisterInfo {
             id: RegisterId::$name,
-            name: "$name",
+            name: stringify!($name),
             dwarf_id: $dwarf_id,
             size: 8,
             offset: gpr_offset!($name),
@@ -186,7 +240,7 @@ macro_rules! define_gpr_32 {
     ($name:ident, $super:ident) => {
         RegisterInfo {
             id: RegisterId::$name,
-            name: "$name",
+            name: stringify!($name),
             dwarf_id: -1,
             size: 4,
             offset: gpr_offset!($super),
@@ -200,7 +254,7 @@ macro_rules! define_gpr_16 {
     ($name:ident, $super:ident) => {
         RegisterInfo {
             id: RegisterId::$name,
-            name: "$name",
+            name: stringify!($name),
             dwarf_id: -1,
             size: 2,
             offset: gpr_offset!($super),
@@ -214,7 +268,7 @@ macro_rules! define_gpr_8h {
     ($name:ident, $super:ident) => {
         RegisterInfo {
             id: RegisterId::$name,
-            name: "$name",
+            name: stringify!($name),
             dwarf_id: -1,
             size: 1,
             offset: gpr_offset!($super) + 1,
@@ -228,7 +282,7 @@ macro_rules! define_gpr_8l {
     ($name:ident, $super:ident) => {
         RegisterInfo {
             id: RegisterId::$name,
-            name: "$name",
+            name: stringify!($name),
             dwarf_id: -1,
             size: 1,
             offset: gpr_offset!($super),
@@ -242,7 +296,7 @@ macro_rules! define_fpr {
     ($name:ident, $dwarf_id:literal, $user_name:ident) => {
         RegisterInfo {
             id: RegisterId::$name,
-            name: "$name",
+            name: stringify!($name),
             dwarf_id: $dwarf_id,
             size: fpr_size!($user_name),
             offset: fpr_offset!($user_name),
@@ -252,7 +306,63 @@ macro_rules! define_fpr {
     };
 }
 
-pub const REGISTER_INFOS: &[RegisterInfo] = &[
+macro_rules! define_fpr_st {
+    ($name:ident, $number:literal) => {
+        RegisterInfo {
+            id: RegisterId::$name,
+            name: stringify!($name),
+            dwarf_id: 33 + $number,
+            size: 16,
+            offset: (fpr_offset!(st_space) + $number * 16),
+            r#type: RegisterType::Fpr,
+            format: RegisterFormat::LongDouble,
+        }
+    };
+}
+
+macro_rules! define_fpr_mm {
+    ($name:ident, $number:literal) => {
+        RegisterInfo {
+            id: RegisterId::$name,
+            name: stringify!($name),
+            dwarf_id: 41 + $number,
+            size: 8,
+            offset: (fpr_offset!(st_space) + $number * 16),
+            r#type: RegisterType::Fpr,
+            format: RegisterFormat::Vector,
+        }
+    };
+}
+
+macro_rules! define_fpr_xmm {
+    ($name:ident, $number:literal) => {
+        RegisterInfo {
+            id: RegisterId::$name,
+            name: stringify!($name),
+            dwarf_id: 17 + $number,
+            size: 16,
+            offset: (fpr_offset!(st_space) + $number * 16),
+            r#type: RegisterType::Fpr,
+            format: RegisterFormat::Vector,
+        }
+    };
+}
+
+macro_rules! define_dr {
+    ($name:ident, $number:literal) => {
+        RegisterInfo {
+            id: RegisterId::$name,
+            name: stringify!($name),
+            dwarf_id: -1,
+            size: 8,
+            offset: dr_offset!($number),
+            r#type: RegisterType::Dr,
+            format: RegisterFormat::UInt,
+        }
+    };
+}
+
+const REGISTER_INFOS: &[RegisterInfo] = &[
     // 64-bit GPRs
     define_gpr_64!(rax, 0),
     define_gpr_64!(rdx, 1),
@@ -345,4 +455,64 @@ pub const REGISTER_INFOS: &[RegisterInfo] = &[
     define_fpr!(frdp, -1, rdp),
     define_fpr!(mxcsr, 64, mxcsr),
     define_fpr!(mxcsrmask, -1, mxcr_mask),
+    // ST registers
+    define_fpr_st!(st0, 0),
+    define_fpr_st!(st1, 1),
+    define_fpr_st!(st2, 2),
+    define_fpr_st!(st3, 3),
+    define_fpr_st!(st4, 4),
+    define_fpr_st!(st5, 5),
+    define_fpr_st!(st6, 6),
+    define_fpr_st!(st7, 7),
+    // MM registers
+    define_fpr_mm!(mm0, 0),
+    define_fpr_mm!(mm1, 1),
+    define_fpr_mm!(mm2, 2),
+    define_fpr_mm!(mm3, 3),
+    define_fpr_mm!(mm4, 4),
+    define_fpr_mm!(mm5, 5),
+    define_fpr_mm!(mm6, 6),
+    define_fpr_mm!(mm7, 7),
+    // XMM registers
+    define_fpr_xmm!(xmm0, 0),
+    define_fpr_xmm!(xmm1, 1),
+    define_fpr_xmm!(xmm2, 2),
+    define_fpr_xmm!(xmm3, 3),
+    define_fpr_xmm!(xmm4, 4),
+    define_fpr_xmm!(xmm5, 5),
+    define_fpr_xmm!(xmm6, 6),
+    define_fpr_xmm!(xmm7, 7),
+    define_fpr_xmm!(xmm8, 8),
+    define_fpr_xmm!(xmm9, 9),
+    define_fpr_xmm!(xmm10, 10),
+    define_fpr_xmm!(xmm11, 11),
+    define_fpr_xmm!(xmm12, 12),
+    define_fpr_xmm!(xmm13, 13),
+    define_fpr_xmm!(xmm14, 14),
+    define_fpr_xmm!(xmm15, 15),
+    // Debug registers
+    define_dr!(dr0, 0),
+    define_dr!(dr1, 1),
+    define_dr!(dr2, 2),
+    define_dr!(dr3, 3),
+    define_dr!(dr4, 4),
+    define_dr!(dr5, 5),
+    define_dr!(dr6, 6),
+    define_dr!(dr7, 7),
 ];
+
+pub fn register_info_by_id(id: RegisterId) -> &'static RegisterInfo {
+    REGISTER_INFOS.iter().find(|&info| info.id == id).unwrap()
+}
+
+pub fn register_info_by_name(name: impl AsRef<str>) -> Option<&'static RegisterInfo> {
+    REGISTER_INFOS
+        .iter()
+        .find(|&info| info.name == name.as_ref())
+}
+
+pub fn register_info_by_dwarf(dwarf_id: i32) -> Option<&'static RegisterInfo> {
+    REGISTER_INFOS
+        .iter()
+        .find(|&info| info.dwarf_id == dwarf_id)
+}
