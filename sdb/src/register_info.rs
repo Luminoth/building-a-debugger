@@ -1,6 +1,8 @@
 #![allow(dead_code)]
 #![allow(non_camel_case_types)]
 
+use nix::libc;
+
 #[derive(Debug)]
 pub enum RegisterId {
     // 64-bit GPRs
@@ -91,6 +93,16 @@ pub enum RegisterId {
     r13b,
     r14b,
     r15b,
+
+    // FPRs
+    fcw,
+    fsw,
+    ftw,
+    fop,
+    frip,
+    frdp,
+    mxcsr,
+    mxcsrmask,
 }
 
 #[derive(Debug)]
@@ -115,14 +127,43 @@ pub struct RegisterInfo {
     name: &'static str,
     dwarf_id: i32,
     size: usize,
-    //offset: usize,
+    offset: usize,
     r#type: RegisterType,
     format: RegisterFormat,
 }
 
-// TODO:
-// https://doc.rust-lang.org/std/mem/macro.offset_of.html
-// https://doc.rust-lang.org/std/mem/fn.size_of.html
+macro_rules! gpr_offset {
+    ($reg:ident) => {
+        std::mem::offset_of!(libc::user, regs) + std::mem::offset_of!(libc::user_regs_struct, $reg)
+    };
+}
+
+macro_rules! fpr_offset {
+    ($reg:ident) => {
+        std::mem::offset_of!(libc::user, i387)
+            + std::mem::offset_of!(libc::user_fpregs_struct, $reg)
+    };
+}
+
+// https://internals.rust-lang.org/t/official-way-to-get-the-size-of-a-field/22123
+const fn size_of_return_value<F, T, U>(_f: &F) -> usize
+where
+    F: FnOnce(T) -> U,
+{
+    std::mem::size_of::<U>()
+}
+
+macro_rules! size_of_field {
+    ($type:ty, $field:ident) => {
+        size_of_return_value(&|s: $type| s.$field)
+    };
+}
+
+macro_rules! fpr_size {
+    ($reg:ident) => {
+        size_of_field!(libc::user_fpregs_struct, $reg)
+    };
+}
 
 macro_rules! define_gpr_64 {
     ($name:ident, $dwarf_id:literal) => {
@@ -131,7 +172,7 @@ macro_rules! define_gpr_64 {
             name: "$name",
             dwarf_id: $dwarf_id,
             size: 8,
-            //offset: 0,
+            offset: gpr_offset!($name),
             r#type: RegisterType::Gpr,
             format: RegisterFormat::UInt,
         }
@@ -145,7 +186,7 @@ macro_rules! define_gpr_32 {
             name: "$name",
             dwarf_id: -1,
             size: 4,
-            //offset: 0,
+            offset: gpr_offset!($super),
             r#type: RegisterType::SubGpr,
             format: RegisterFormat::UInt,
         }
@@ -159,7 +200,7 @@ macro_rules! define_gpr_16 {
             name: "$name",
             dwarf_id: -1,
             size: 2,
-            //offset: 0,
+            offset: gpr_offset!($super),
             r#type: RegisterType::SubGpr,
             format: RegisterFormat::UInt,
         }
@@ -173,7 +214,7 @@ macro_rules! define_gpr_8h {
             name: "$name",
             dwarf_id: -1,
             size: 1,
-            //offset: 0, + 1
+            offset: gpr_offset!($super) + 1,
             r#type: RegisterType::SubGpr,
             format: RegisterFormat::UInt,
         }
@@ -187,8 +228,22 @@ macro_rules! define_gpr_8l {
             name: "$name",
             dwarf_id: -1,
             size: 1,
-            //offset: 0,
+            offset: gpr_offset!($super),
             r#type: RegisterType::SubGpr,
+            format: RegisterFormat::UInt,
+        }
+    };
+}
+
+macro_rules! define_fpr {
+    ($name:ident, $dwarf_id:literal, $user_name:ident) => {
+        RegisterInfo {
+            id: RegisterId::$name,
+            name: "$name",
+            dwarf_id: $dwarf_id,
+            size: fpr_size!($user_name),
+            offset: fpr_offset!($user_name),
+            r#type: RegisterType::Fpr,
             format: RegisterFormat::UInt,
         }
     };
@@ -278,4 +333,13 @@ pub const REGISTER_INFOS: &[RegisterInfo] = &[
     define_gpr_8l!(r13b, r13),
     define_gpr_8l!(r14b, r14),
     define_gpr_8l!(r15b, r15),
+    // FPRs
+    define_fpr!(fcw, 65, cwd),
+    define_fpr!(fsw, 66, swd),
+    define_fpr!(ftw, -1, ftw),
+    define_fpr!(fop, -1, fop),
+    define_fpr!(frip, -1, rip),
+    define_fpr!(frdp, -1, rdp),
+    define_fpr!(mxcsr, 64, mxcsr),
+    define_fpr!(mxcsrmask, -1, mxcr_mask),
 ];
