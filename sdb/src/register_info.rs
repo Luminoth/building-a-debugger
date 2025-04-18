@@ -3,6 +3,42 @@
 
 use nix::libc;
 
+macro_rules! gpr_offset {
+    ($reg:ident) => {
+        std::mem::offset_of!(libc::user, regs) + std::mem::offset_of!(libc::user_regs_struct, $reg)
+    };
+}
+
+macro_rules! fpr_offset {
+    ($reg:ident) => {
+        std::mem::offset_of!(libc::user, i387)
+            + std::mem::offset_of!(libc::user_fpregs_struct, $reg)
+    };
+}
+
+// https://internals.rust-lang.org/t/official-way-to-get-the-size-of-a-field/22123
+const fn size_of_return_value<F, T, U>(_f: &F) -> usize
+where
+    F: FnOnce(T) -> U,
+{
+    std::mem::size_of::<U>()
+}
+
+macro_rules! size_of_field {
+    ($type:ty, $field:ident) => {
+        size_of_return_value(&|s: $type| s.$field)
+    };
+}
+
+macro_rules! fpr_size {
+    ($reg:ident) => {
+        size_of_field!(libc::user_fpregs_struct, $reg)
+    };
+}
+
+// TODO: there's probably a way to turn this into a more X-macro style?
+// where the enum and the array are automatically kept in sync
+
 #[derive(Debug)]
 pub enum RegisterId {
     // 64-bit GPRs
@@ -130,39 +166,6 @@ pub struct RegisterInfo {
     offset: usize,
     r#type: RegisterType,
     format: RegisterFormat,
-}
-
-macro_rules! gpr_offset {
-    ($reg:ident) => {
-        std::mem::offset_of!(libc::user, regs) + std::mem::offset_of!(libc::user_regs_struct, $reg)
-    };
-}
-
-macro_rules! fpr_offset {
-    ($reg:ident) => {
-        std::mem::offset_of!(libc::user, i387)
-            + std::mem::offset_of!(libc::user_fpregs_struct, $reg)
-    };
-}
-
-// https://internals.rust-lang.org/t/official-way-to-get-the-size-of-a-field/22123
-const fn size_of_return_value<F, T, U>(_f: &F) -> usize
-where
-    F: FnOnce(T) -> U,
-{
-    std::mem::size_of::<U>()
-}
-
-macro_rules! size_of_field {
-    ($type:ty, $field:ident) => {
-        size_of_return_value(&|s: $type| s.$field)
-    };
-}
-
-macro_rules! fpr_size {
-    ($reg:ident) => {
-        size_of_field!(libc::user_fpregs_struct, $reg)
-    };
 }
 
 macro_rules! define_gpr_64 {
