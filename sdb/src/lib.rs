@@ -1,18 +1,24 @@
+mod bit;
 mod pipe;
 mod register_info;
 mod registers;
 mod test;
+mod types;
 
 use std::ffi::CString;
 
 use nix::{
     errno::Errno,
+    libc,
     sys::{ptrace, signal, wait},
     unistd::{self, Pid},
 };
+use num_traits::{FromPrimitive, ToPrimitive};
 use tracing::trace;
 
 use pipe::Pipe;
+use register_info::{RegisterId, register_info_by_id};
+use registers::{RegisterValue, Registers};
 
 #[derive(Debug, thiserror::Error)]
 pub enum SdbError {
@@ -40,6 +46,9 @@ pub enum SdbError {
     #[error("procfs error: {0}")]
     Procfs(#[from] procfs::ProcError),
 
+    #[error("register error: {0}")]
+    Register(String),
+
     #[error("other error: {0}")]
     Other(String),
 }
@@ -61,6 +70,7 @@ pub struct Process {
     terminate_on_drop: bool,
     is_attached: bool,
     state: ProcessState,
+    registers: Registers,
 }
 
 impl Drop for Process {
@@ -97,7 +107,28 @@ impl Process {
             terminate_on_drop,
             is_attached,
             state: ProcessState::default(),
+            registers: Registers::new(),
         }
+    }
+
+    fn read_all_registers(&mut self) -> Result<()> {
+        let regs = ptrace::getregs(self.pid).map_err(SdbError::Ptrace)?;
+        self.get_registers_mut().get_data_mut().regs = regs;
+
+        let regs =
+            ptrace::getregset::<ptrace::regset::NT_PRFPREG>(self.pid).map_err(SdbError::Ptrace)?;
+        self.get_registers_mut().get_data_mut().i387 = regs;
+
+        for i in 0..8_usize {
+            let id = RegisterId::dr0.to_usize().unwrap() + i;
+            let info = register_info_by_id(RegisterId::from_usize(id).unwrap());
+
+            let data = ptrace::read_user(self.pid, info.offset as ptrace::AddressType)
+                .map_err(SdbError::Ptrace)?;
+            self.get_registers_mut().get_data_mut().u_debugreg[i] = data as u64;
+        }
+
+        Ok(())
     }
 
     pub fn attach(pid: i32) -> Result<Self> {
@@ -165,6 +196,16 @@ impl Process {
     }
 
     #[inline]
+    pub fn get_registers(&self) -> &Registers {
+        &self.registers
+    }
+
+    #[inline]
+    fn get_registers_mut(&mut self) -> &mut Registers {
+        &mut self.registers
+    }
+
+    #[inline]
     pub fn get_status(&self) -> Result<char> {
         let process = procfs::process::Process::new(self.pid.as_raw())?;
         Ok(process.stat()?.state)
@@ -179,6 +220,11 @@ impl Process {
             wait::WaitStatus::Stopped(..) => self.state = ProcessState::Stopped,
             _ => (),
         }
+
+        if self.is_attached && self.state == ProcessState::Stopped {
+            self.read_all_registers()?;
+        }
+
         Ok(status)
     }
 
@@ -188,6 +234,25 @@ impl Process {
 
         Ok(())
     }
+
+    // TODO: this is lame hack to avoid self-referencing in Registers
+    #[allow(clippy::missing_safety_doc)]
+    pub unsafe fn write_register_by_id(&self, id: RegisterId, val: RegisterValue) -> Result<()> {
+        unsafe { self.registers.write_by_id(id, val, self) }
+    }
+
+    pub(crate) fn write_user_area(&self, offset: usize, data: i64) -> Result<()> {
+        ptrace::write_user(self.pid, offset as ptrace::AddressType, data).map_err(SdbError::Ptrace)
+    }
+
+    // have to write fprs all at once
+    pub(crate) fn write_fprs(&self, fprs: libc::user_fpregs_struct) -> Result<()> {
+        ptrace::setregset::<ptrace::regset::NT_PRFPREG>(self.pid, fprs).map_err(SdbError::Ptrace)
+    }
+
+    /*pub(crate) fn writegprs(&self, gprs: libc::user_regs_struct) -> Result<()> {
+        ptrace::setregs(self.pid, gprs).map_err(SdbError::Ptrace)
+    }*/
 }
 
 #[cfg(test)]

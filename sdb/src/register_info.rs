@@ -45,7 +45,7 @@ macro_rules! fpr_size {
 // TODO: there's probably a way to turn this into a more X-macro style?
 // where the enum and the array are automatically kept in sync
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, num_derive::FromPrimitive, num_derive::ToPrimitive)]
 pub enum RegisterId {
     // 64-bit GPRs
     rax,
@@ -195,7 +195,7 @@ pub enum RegisterId {
     dr7,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum RegisterType {
     Gpr,
     SubGpr,
@@ -203,7 +203,7 @@ pub enum RegisterType {
     Dr,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum RegisterFormat {
     UInt,
     DoubleFloat,
@@ -211,15 +211,21 @@ pub enum RegisterFormat {
     Vector,
 }
 
+impl RegisterFormat {
+    fn is_float(&self) -> bool {
+        matches!(self, Self::DoubleFloat | Self::LongDouble)
+    }
+}
+
 #[derive(Debug)]
 pub struct RegisterInfo {
     id: RegisterId,
     name: &'static str,
     dwarf_id: i32,
-    size: usize,
-    offset: usize,
-    r#type: RegisterType,
-    format: RegisterFormat,
+    pub(crate) size: usize,
+    pub(crate) offset: usize,
+    pub(crate) r#type: RegisterType,
+    pub(crate) format: RegisterFormat,
 }
 
 macro_rules! define_gpr_64 {
