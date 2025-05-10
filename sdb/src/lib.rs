@@ -5,7 +5,9 @@ mod registers;
 mod test;
 mod types;
 
+use std::cell::RefCell;
 use std::ffi::CString;
+use std::os::fd::OwnedFd;
 
 use nix::{
     errno::Errno,
@@ -70,7 +72,7 @@ pub struct Process {
     terminate_on_drop: bool,
     is_attached: bool,
     state: ProcessState,
-    registers: Registers,
+    registers: RefCell<Registers>,
 }
 
 impl Drop for Process {
@@ -107,17 +109,17 @@ impl Process {
             terminate_on_drop,
             is_attached,
             state: ProcessState::default(),
-            registers: Registers::new(),
+            registers: RefCell::new(Registers::new()),
         }
     }
 
     fn read_all_registers(&mut self) -> Result<()> {
         let regs = ptrace::getregs(self.pid).map_err(SdbError::Ptrace)?;
-        self.get_registers_mut().get_data_mut().regs = regs;
+        self.registers.borrow_mut().get_data_mut().regs = regs;
 
         let regs =
             ptrace::getregset::<ptrace::regset::NT_PRFPREG>(self.pid).map_err(SdbError::Ptrace)?;
-        self.get_registers_mut().get_data_mut().i387 = regs;
+        self.registers.borrow_mut().get_data_mut().i387 = regs;
 
         for i in 0..8_usize {
             let id = RegisterId::dr0.to_usize().unwrap() + i;
@@ -125,7 +127,7 @@ impl Process {
 
             let data = ptrace::read_user(self.pid, info.offset as ptrace::AddressType)
                 .map_err(SdbError::Ptrace)?;
-            self.get_registers_mut().get_data_mut().u_debugreg[i] = data as u64;
+            self.registers.borrow_mut().get_data_mut().u_debugreg[i] = data as u64;
         }
 
         Ok(())
@@ -139,7 +141,11 @@ impl Process {
         Ok(this)
     }
 
-    pub fn launch(path: impl Into<String>, debug: bool) -> Result<Self> {
+    pub fn launch(
+        path: impl Into<String>,
+        debug: bool,
+        stdout_replacement: Option<OwnedFd>,
+    ) -> Result<Self> {
         let path = CString::new(path.into()).unwrap();
         let args: Vec<CString> = Vec::default();
 
@@ -164,9 +170,15 @@ impl Process {
             Ok(unistd::ForkResult::Child) => {
                 channel.close_read();
 
+                if let Some(stdout_replacement) = stdout_replacement {
+                    if let Err(errno) = unistd::dup2_stdout(stdout_replacement) {
+                        Self::exit_with_perror(&channel, "stdout replacement failed", errno);
+                    }
+                }
+
                 if debug {
                     if let Err(errno) = ptrace::traceme() {
-                        Self::exit_with_perror(&channel, "Tracing failed", errno);
+                        Self::exit_with_perror(&channel, "tracing failed", errno);
                     }
                 }
 
@@ -195,7 +207,7 @@ impl Process {
         self.state
     }
 
-    #[inline]
+    /*#[inline]
     pub fn get_registers(&self) -> &Registers {
         &self.registers
     }
@@ -203,7 +215,7 @@ impl Process {
     #[inline]
     fn get_registers_mut(&mut self) -> &mut Registers {
         &mut self.registers
-    }
+    }*/
 
     #[inline]
     pub fn get_status(&self) -> Result<char> {
@@ -237,12 +249,17 @@ impl Process {
 
     // TODO: this is lame hack to avoid self-referencing in Registers
     #[allow(clippy::missing_safety_doc)]
-    pub unsafe fn write_register_by_id(&self, id: RegisterId, val: RegisterValue) -> Result<()> {
-        unsafe { self.registers.write_by_id(id, val, self) }
+    pub fn write_register_by_id(&self, id: RegisterId, val: RegisterValue) -> Result<()> {
+        self.registers.borrow_mut().write_by_id(id, val, self)
     }
 
-    pub(crate) fn write_user_area(&self, offset: usize, data: i64) -> Result<()> {
-        ptrace::write_user(self.pid, offset as ptrace::AddressType, data).map_err(SdbError::Ptrace)
+    pub(crate) fn write_user_area(&self, offset: usize, data: u64) -> Result<()> {
+        ptrace::write_user(
+            self.pid,
+            offset as ptrace::AddressType,
+            data as libc::c_long,
+        )
+        .map_err(SdbError::Ptrace)
     }
 
     // have to write fprs all at once
@@ -258,16 +275,17 @@ impl Process {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pipe::Pipe;
 
     #[test]
     fn process_attach_success() {
-        let target = Process::launch("yes", false).unwrap();
+        let target = Process::launch("yes", false, None).unwrap();
 
         let process = Process::attach(target.get_id().as_raw());
         assert!(process.is_ok());
         let process = process.unwrap();
 
-        assert!(process.get_status().unwrap() == 't');
+        assert_eq!(process.get_status().unwrap(), 't');
     }
 
     #[test]
@@ -282,7 +300,7 @@ mod tests {
 
     #[test]
     fn process_launch_success() {
-        let process = Process::launch("yes", true);
+        let process = Process::launch("yes", true, None);
         assert!(process.is_ok());
         let process = process.unwrap();
 
@@ -291,7 +309,7 @@ mod tests {
 
     #[test]
     fn process_launch_no_such_program() {
-        let process = Process::launch("you_do_not_have_to_be_good", true);
+        let process = Process::launch("you_do_not_have_to_be_good", true, None);
         assert!(process.is_err());
         assert!(matches!(
             process,
@@ -302,7 +320,7 @@ mod tests {
     #[test]
     fn process_resume_success() {
         {
-            let mut process = Process::launch("yes", true).unwrap();
+            let mut process = Process::launch("yes", true, None).unwrap();
 
             let result = process.resume();
             assert!(result.is_ok());
@@ -312,7 +330,7 @@ mod tests {
         }
 
         {
-            let target = Process::launch("yes", false).unwrap();
+            let target = Process::launch("yes", false, None).unwrap();
             let mut process = Process::attach(target.get_id().as_raw()).unwrap();
 
             let result = process.resume();
@@ -325,14 +343,34 @@ mod tests {
 
     #[test]
     fn process_resume_already_exited() {
-        let mut process = Process::launch("echo", true).unwrap();
-        let _ = process.resume();
-        let _ = process.wait_on_signal();
+        let mut process = Process::launch("echo", true, None).unwrap();
+        process.resume().unwrap();
+        process.wait_on_signal().unwrap();
 
         let result = process.resume();
         assert!(matches!(
             result,
             std::result::Result::Err(SdbError::Ptrace(..))
         ));
+    }
+
+    #[test]
+    fn write_register_works() {
+        let mut channel = Pipe::new(false).unwrap();
+        let mut process =
+            Process::launch("test/targets/reg_write", true, channel.write.take()).unwrap();
+        process.resume().unwrap();
+        process.wait_on_signal().unwrap();
+
+        // 0xcafecafe == 3405695742
+        // [254, 202, 254, 202, 0, 0, 0, 0] as bytes
+        let result = process.write_register_by_id(RegisterId::rsi, 0xcafecafe_u64.into());
+        assert!(result.is_ok());
+
+        process.resume().unwrap();
+        process.wait_on_signal().unwrap();
+
+        let output = String::from_utf8(channel.read().unwrap()).unwrap();
+        assert_eq!(output, "0xcafecafe");
     }
 }

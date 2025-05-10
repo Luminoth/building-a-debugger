@@ -116,7 +116,7 @@ fn main() -> anyhow::Result<()> {
         }
         Command::Spawn(command) => {
             info!("Spawning process from {} ...", command.path);
-            sdb::Process::launch(command.path, true)?
+            sdb::Process::launch(command.path, true, None)?
         }
     };
 

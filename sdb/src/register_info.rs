@@ -211,12 +211,6 @@ pub enum RegisterFormat {
     Vector,
 }
 
-impl RegisterFormat {
-    fn is_float(&self) -> bool {
-        matches!(self, Self::DoubleFloat | Self::LongDouble)
-    }
-}
-
 #[derive(Debug)]
 pub struct RegisterInfo {
     id: RegisterId,
